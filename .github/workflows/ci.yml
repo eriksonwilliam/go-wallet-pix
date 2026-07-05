@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Format, vet, testes (100%) e build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Verificar formatacao
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Testes com cobertura
+        run: go test ./internal/... -covermode=atomic -coverprofile=coverage.out
+
+      - name: Exigir cobertura de 100%
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          echo "Cobertura total: $total"
+          pct=${total%\%}
+          awk -v p="$pct" 'BEGIN { if (p+0 < 100.0) { print "Cobertura abaixo de 100%"; exit 1 } }'
+
+      - name: Build
+        run: go build ./...
