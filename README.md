@@ -72,6 +72,8 @@ docker compose up --build
 | Método | Rota                       | Descrição                            |
 | ------ | -------------------------- | ------------------------------------ |
 | GET    | `/health`                  | Health check                         |
+| GET    | `/docs`                    | Swagger UI (documentacao interativa) |
+| GET    | `/openapi.json`            | Especificacao OpenAPI 3               |
 | POST   | `/wallets`                 | Abre uma carteira                    |
 | GET    | `/wallets/{id}`            | Consulta carteira + extrato          |
 | POST   | `/wallets/{id}/deposit`    | Deposita (valor em centavos)         |

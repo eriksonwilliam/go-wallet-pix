@@ -1,0 +1,247 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "go-wallet-pix API",
+    "description": "Carteira digital com PIX simulado. Valores sempre em centavos (int64).",
+    "version": "0.1.0"
+  },
+  "tags": [{ "name": "wallets", "description": "Operacoes de carteira" }],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "status": { "type": "string", "example": "ok" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/wallets": {
+      "post": {
+        "tags": ["wallets"],
+        "summary": "Abre uma carteira",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateWalletRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Carteira criada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Wallet" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/wallets/{id}": {
+      "get": {
+        "tags": ["wallets"],
+        "summary": "Consulta uma carteira e seu extrato",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Carteira",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Wallet" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/wallets/{id}/deposit": {
+      "post": {
+        "tags": ["wallets"],
+        "summary": "Deposita um valor (em centavos)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AmountRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Carteira atualizada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Wallet" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/wallets/{id}/withdraw": {
+      "post": {
+        "tags": ["wallets"],
+        "summary": "Saca um valor (em centavos)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AmountRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Carteira atualizada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Wallet" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/wallets/{id}/transfer": {
+      "post": {
+        "tags": ["wallets"],
+        "summary": "Transfere um valor via chave PIX",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransferRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Carteira de origem atualizada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Wallet" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Erro",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "CreateWalletRequest": {
+        "type": "object",
+        "required": ["owner", "pix_key"],
+        "properties": {
+          "owner": { "type": "string", "example": "Alice" },
+          "pix_key": { "type": "string", "example": "alice@pix" }
+        }
+      },
+      "AmountRequest": {
+        "type": "object",
+        "required": ["amount_cents"],
+        "properties": {
+          "amount_cents": { "type": "integer", "format": "int64", "example": 10000 }
+        }
+      },
+      "TransferRequest": {
+        "type": "object",
+        "required": ["to_pix_key", "amount_cents"],
+        "properties": {
+          "to_pix_key": { "type": "string", "example": "bob@pix" },
+          "amount_cents": { "type": "integer", "format": "int64", "example": 2500 }
+        }
+      },
+      "Transaction": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "example": "deposit" },
+          "amount_cents": { "type": "integer", "format": "int64" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "owner": { "type": "string" },
+          "pix_key": { "type": "string" },
+          "balance_cents": { "type": "integer", "format": "int64" },
+          "balance": { "type": "string", "example": "R$ 100,00" },
+          "transactions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Transaction" }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": { "error": { "type": "string" } }
+      }
+    }
+  }
+}

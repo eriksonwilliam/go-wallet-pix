@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,29 @@ func TestHealth(t *testing.T) {
 	rec := do(t, newRouter(), http.MethodGet, "/health", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestOpenAPISpec(t *testing.T) {
+	rec := do(t, newRouter(), http.MethodGet, "/openapi.json", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "\"openapi\"") {
+		t.Fatalf("spec sem campo openapi: %s", rec.Body.String())
+	}
+}
+
+func TestDocsUI(t *testing.T) {
+	rec := do(t, newRouter(), http.MethodGet, "/docs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "swagger-ui") {
+		t.Fatalf("html sem swagger-ui")
 	}
 }
 

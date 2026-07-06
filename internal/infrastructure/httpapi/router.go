@@ -7,6 +7,8 @@ import "net/http"
 func NewRouter(h *Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
+	mux.HandleFunc("GET /openapi.json", openAPIHandler)
+	mux.HandleFunc("GET /docs", docsHandler)
 	mux.HandleFunc("POST /wallets", h.createWallet)
 	mux.HandleFunc("GET /wallets/{id}", h.getWallet)
 	mux.HandleFunc("POST /wallets/{id}/deposit", h.deposit)
