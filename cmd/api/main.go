@@ -14,10 +14,8 @@ import (
 )
 
 func main() {
-	repo := memory.New()
-	service := application.NewWalletService(repo, newUUID, time.Now)
-	handler := httpapi.NewHandler(service)
-	router := httpapi.NewRouter(handler)
+	service := application.NewWalletService(memory.New(), memory.NewIdempotencyStore(), newUUID, time.Now)
+	router := httpapi.NewRouter(httpapi.NewHandler(service), httpapi.NewMetrics())
 
 	port := os.Getenv("PORT")
 	if port == "" {

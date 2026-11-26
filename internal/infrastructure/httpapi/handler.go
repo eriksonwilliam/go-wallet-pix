@@ -45,7 +45,7 @@ func (h *Handler) deposit(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	wallet, err := h.service.Deposit(r.Context(), r.PathValue("id"), req.AmountCents)
+	wallet, err := h.service.Deposit(r.Context(), idempotencyKey(r), r.PathValue("id"), req.AmountCents)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -58,7 +58,7 @@ func (h *Handler) withdraw(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	wallet, err := h.service.Withdraw(r.Context(), r.PathValue("id"), req.AmountCents)
+	wallet, err := h.service.Withdraw(r.Context(), idempotencyKey(r), r.PathValue("id"), req.AmountCents)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -71,12 +71,17 @@ func (h *Handler) transfer(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	wallet, err := h.service.Transfer(r.Context(), r.PathValue("id"), req.ToPixKey, req.AmountCents)
+	wallet, err := h.service.Transfer(r.Context(), idempotencyKey(r), r.PathValue("id"), req.ToPixKey, req.AmountCents)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toWalletResponse(wallet))
+}
+
+// idempotencyKey le o header opcional. Sem ele a operacao nao e deduplicada.
+func idempotencyKey(r *http.Request) string {
+	return r.Header.Get("Idempotency-Key")
 }
 
 func health(w http.ResponseWriter, _ *http.Request) {
@@ -99,7 +104,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, domain.ErrWalletNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, domain.ErrInsufficientFunds),
-		errors.Is(err, domain.ErrPixKeyAlreadyInUse):
+		errors.Is(err, domain.ErrPixKeyAlreadyInUse),
+		errors.Is(err, domain.ErrBalanceOverflow),
+		errors.Is(err, application.ErrIdempotencyConflict):
 		status = http.StatusConflict
 	case errors.Is(err, domain.ErrInvalidAmount),
 		errors.Is(err, domain.ErrInvalidOwner),

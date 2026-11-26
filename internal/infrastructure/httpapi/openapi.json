@@ -7,6 +7,18 @@
   },
   "tags": [{ "name": "wallets", "description": "Operacoes de carteira" }],
   "paths": {
+    "/metrics": {
+      "get": {
+        "summary": "Metricas no formato de texto do Prometheus",
+        "description": "http_requests_total por metodo, rota (padrao registrado, nunca o id) e status.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "text/plain": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health check",
@@ -86,7 +98,8 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string" }
-          }
+          },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": {
           "required": true,
@@ -106,7 +119,8 @@
             }
           },
           "400": { "$ref": "#/components/responses/Error" },
-          "404": { "$ref": "#/components/responses/Error" }
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -120,7 +134,8 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string" }
-          }
+          },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": {
           "required": true,
@@ -155,7 +170,8 @@
             "in": "path",
             "required": true,
             "schema": { "type": "string" }
-          }
+          },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": {
           "required": true,
@@ -182,6 +198,15 @@
     }
   },
   "components": {
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Opcional. A mesma chave com a mesma requisicao devolve o resultado original sem reaplicar; com outra requisicao, 409.",
+        "schema": { "type": "string" }
+      }
+    },
     "responses": {
       "Error": {
         "description": "Erro",
