@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.24-alpine AS build
+# Toolchain suportado (as duas versoes mais recentes recebem correcao de
+# seguranca). Com 1.24 o binario carregava 23 CVEs HIGH da stdlib.
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download

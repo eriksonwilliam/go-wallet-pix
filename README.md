@@ -33,7 +33,7 @@ evitando imprecisão de ponto flutuante em dinheiro.
 
 ## Stack
 
-- **Linguagem:** Go 1.24 (apenas stdlib)
+- **Linguagem:** Go (toolchain 1.27 no build e na CI; `go.mod` exige 1.24+), apenas stdlib
 - **HTTP:** `net/http` com roteamento por método (Go 1.22+)
 - **Testes:** `testing` + `net/http/httptest`, cobertura 100%
 - **Qualidade:** `gofmt` + `go vet`
