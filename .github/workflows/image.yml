@@ -1,0 +1,91 @@
+name: Imagem
+
+# Pull request e tag v*: build, SBOM e varredura de vulnerabilidades, sem publicar.
+# Publicar no GHCR é uma ação separada e manual (Actions → Imagem → Run workflow,
+# informando a tag): criar a tag não publica nada. Assim "validar a versão" e
+# "publicar a imagem" são decisões distintas.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag já existente a publicar (ex.: v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/go-wallet-pix
+      PUBLISH: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Na publicação, o código vem da tag informada, nunca da branch atual.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Validar a tag informada
+        if: env.PUBLISH == 'true'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag inválida: $TAG (esperado vX.Y.Z)"; exit 1 ;;
+          esac
+          git rev-parse --verify "refs/tags/$TAG"
+
+      - name: Build
+        run: docker build -t "$IMAGE:${{ github.sha }}" .
+
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@v0.17.8
+        with:
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Trivy (vulnerabilidades da imagem)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Guardar SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+      - name: Login no GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar
+        if: env.PUBLISH == 'true'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          version="${TAG#v}"
+          commit="$(git rev-parse --short HEAD)"
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:$version"
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:sha-$commit"
+          docker push "$IMAGE:$version"
+          docker push "$IMAGE:sha-$commit"

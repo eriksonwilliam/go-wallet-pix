@@ -12,4 +12,5 @@ var (
 	ErrInvalidPixKey      = errors.New("chave pix invalida")
 	ErrPixKeyAlreadyInUse = errors.New("chave pix ja esta em uso")
 	ErrSameWallet         = errors.New("transferencia para a mesma carteira")
+	ErrBalanceOverflow    = errors.New("valor excede o saldo maximo representavel")
 )

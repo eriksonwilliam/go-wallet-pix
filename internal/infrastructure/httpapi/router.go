@@ -3,10 +3,11 @@ package httpapi
 import "net/http"
 
 // NewRouter registra as rotas usando o roteamento por metodo do net/http
-// (Go 1.22+), sem dependencias externas.
-func NewRouter(h *Handler) http.Handler {
+// (Go 1.22+), sem dependencias externas, e instrumenta todas com metrics.
+func NewRouter(h *Handler, metrics *Metrics) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
+	mux.Handle("GET /metrics", metrics)
 	mux.HandleFunc("GET /openapi.json", openAPIHandler)
 	mux.HandleFunc("GET /docs", docsHandler)
 	mux.HandleFunc("POST /wallets", h.createWallet)
@@ -14,5 +15,5 @@ func NewRouter(h *Handler) http.Handler {
 	mux.HandleFunc("POST /wallets/{id}/deposit", h.deposit)
 	mux.HandleFunc("POST /wallets/{id}/withdraw", h.withdraw)
 	mux.HandleFunc("POST /wallets/{id}/transfer", h.transfer)
-	return mux
+	return metrics.Instrument(mux)
 }

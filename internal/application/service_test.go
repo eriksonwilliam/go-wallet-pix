@@ -13,13 +13,13 @@ import (
 // fakeRepo permite injetar comportamento por chamada, cobrindo os ramos de
 // erro do servico (falhas de persistencia, nao encontrado, etc.).
 type fakeRepo struct {
-	saveFn      func(ctx context.Context, w *domain.Wallet) error
+	saveFn      func(ctx context.Context, w ...*domain.Wallet) error
 	findByIDFn  func(ctx context.Context, id string) (*domain.Wallet, error)
 	findByPixFn func(ctx context.Context, pixKey string) (*domain.Wallet, error)
 }
 
-func (r *fakeRepo) Save(ctx context.Context, w *domain.Wallet) error {
-	return r.saveFn(ctx, w)
+func (r *fakeRepo) Save(ctx context.Context, w ...*domain.Wallet) error {
+	return r.saveFn(ctx, w...)
 }
 func (r *fakeRepo) FindByID(ctx context.Context, id string) (*domain.Wallet, error) {
 	return r.findByIDFn(ctx, id)
@@ -37,7 +37,7 @@ var (
 	boom        = errors.New("falha de infraestrutura")
 	notFound    = func(context.Context, string) (*domain.Wallet, error) { return nil, domain.ErrWalletNotFound }
 	notFoundPix = func(context.Context, string) (*domain.Wallet, error) { return nil, domain.ErrWalletNotFound }
-	okSave      = func(context.Context, *domain.Wallet) error { return nil }
+	okSave      = func(context.Context, ...*domain.Wallet) error { return nil }
 )
 
 func newWallet(t *testing.T, id, owner, pix string) *domain.Wallet {
@@ -54,7 +54,7 @@ func TestCreateWallet(t *testing.T) {
 
 	t.Run("sucesso", func(t *testing.T) {
 		repo := &fakeRepo{findByPixFn: notFoundPix, saveFn: okSave}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
 		w, err := svc.CreateWallet(ctx, "Alice", "alice@pix")
 		if err != nil || w.Owner() != "Alice" {
 			t.Fatalf("resultado inesperado: %v / %v", w, err)
@@ -65,7 +65,7 @@ func TestCreateWallet(t *testing.T) {
 		repo := &fakeRepo{findByPixFn: func(context.Context, string) (*domain.Wallet, error) {
 			return newWallet(t, "id-x", "Outro", "alice@pix"), nil
 		}}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
 		if _, err := svc.CreateWallet(ctx, "Alice", "alice@pix"); !errors.Is(err, domain.ErrPixKeyAlreadyInUse) {
 			t.Fatalf("esperava ErrPixKeyAlreadyInUse, obtive %v", err)
 		}
@@ -73,7 +73,7 @@ func TestCreateWallet(t *testing.T) {
 
 	t.Run("erro ao consultar chave pix", func(t *testing.T) {
 		repo := &fakeRepo{findByPixFn: func(context.Context, string) (*domain.Wallet, error) { return nil, boom }}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
 		if _, err := svc.CreateWallet(ctx, "Alice", "alice@pix"); !errors.Is(err, boom) {
 			t.Fatalf("esperava boom, obtive %v", err)
 		}
@@ -81,15 +81,15 @@ func TestCreateWallet(t *testing.T) {
 
 	t.Run("titular invalido", func(t *testing.T) {
 		repo := &fakeRepo{findByPixFn: notFoundPix}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
 		if _, err := svc.CreateWallet(ctx, "  ", "alice@pix"); !errors.Is(err, domain.ErrInvalidOwner) {
 			t.Fatalf("esperava ErrInvalidOwner, obtive %v", err)
 		}
 	})
 
 	t.Run("erro ao salvar", func(t *testing.T) {
-		repo := &fakeRepo{findByPixFn: notFoundPix, saveFn: func(context.Context, *domain.Wallet) error { return boom }}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
+		repo := &fakeRepo{findByPixFn: notFoundPix, saveFn: func(context.Context, ...*domain.Wallet) error { return boom }}
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
 		if _, err := svc.CreateWallet(ctx, "Alice", "alice@pix"); !errors.Is(err, boom) {
 			t.Fatalf("esperava boom, obtive %v", err)
 		}
@@ -101,7 +101,7 @@ func TestGetWallet(t *testing.T) {
 	repo := &fakeRepo{findByIDFn: func(context.Context, string) (*domain.Wallet, error) {
 		return newWallet(t, "id-1", "Alice", "alice@pix"), nil
 	}}
-	svc := application.NewWalletService(repo, seqID(), fixedClock)
+	svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
 	if w, err := svc.GetWallet(ctx, "id-1"); err != nil || w.ID() != "id-1" {
 		t.Fatalf("resultado inesperado: %v / %v", w, err)
 	}
@@ -111,15 +111,15 @@ func TestDeposit(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("valor invalido", func(t *testing.T) {
-		svc := application.NewWalletService(&fakeRepo{}, seqID(), fixedClock)
-		if _, err := svc.Deposit(ctx, "id-1", 0); !errors.Is(err, domain.ErrInvalidAmount) {
+		svc := application.NewWalletService(&fakeRepo{}, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Deposit(ctx, "", "id-1", 0); !errors.Is(err, domain.ErrInvalidAmount) {
 			t.Fatalf("esperava ErrInvalidAmount, obtive %v", err)
 		}
 	})
 
 	t.Run("carteira nao encontrada", func(t *testing.T) {
-		svc := application.NewWalletService(&fakeRepo{findByIDFn: notFound}, seqID(), fixedClock)
-		if _, err := svc.Deposit(ctx, "id-1", 100); !errors.Is(err, domain.ErrWalletNotFound) {
+		svc := application.NewWalletService(&fakeRepo{findByIDFn: notFound}, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Deposit(ctx, "", "id-1", 100); !errors.Is(err, domain.ErrWalletNotFound) {
 			t.Fatalf("esperava ErrWalletNotFound, obtive %v", err)
 		}
 	})
@@ -129,10 +129,10 @@ func TestDeposit(t *testing.T) {
 			findByIDFn: func(context.Context, string) (*domain.Wallet, error) {
 				return newWallet(t, "id-1", "Alice", "alice@pix"), nil
 			},
-			saveFn: func(context.Context, *domain.Wallet) error { return boom },
+			saveFn: func(context.Context, ...*domain.Wallet) error { return boom },
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Deposit(ctx, "id-1", 100); !errors.Is(err, boom) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Deposit(ctx, "", "id-1", 100); !errors.Is(err, boom) {
 			t.Fatalf("esperava boom, obtive %v", err)
 		}
 	})
@@ -144,8 +144,8 @@ func TestDeposit(t *testing.T) {
 			},
 			saveFn: okSave,
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		w, err := svc.Deposit(ctx, "id-1", 2500)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		w, err := svc.Deposit(ctx, "", "id-1", 2500)
 		if err != nil || w.Balance() != 2500 {
 			t.Fatalf("resultado inesperado: %v / %v", w, err)
 		}
@@ -156,15 +156,15 @@ func TestWithdraw(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("valor invalido", func(t *testing.T) {
-		svc := application.NewWalletService(&fakeRepo{}, seqID(), fixedClock)
-		if _, err := svc.Withdraw(ctx, "id-1", -1); !errors.Is(err, domain.ErrInvalidAmount) {
+		svc := application.NewWalletService(&fakeRepo{}, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Withdraw(ctx, "", "id-1", -1); !errors.Is(err, domain.ErrInvalidAmount) {
 			t.Fatalf("esperava ErrInvalidAmount, obtive %v", err)
 		}
 	})
 
 	t.Run("carteira nao encontrada", func(t *testing.T) {
-		svc := application.NewWalletService(&fakeRepo{findByIDFn: notFound}, seqID(), fixedClock)
-		if _, err := svc.Withdraw(ctx, "id-1", 100); !errors.Is(err, domain.ErrWalletNotFound) {
+		svc := application.NewWalletService(&fakeRepo{findByIDFn: notFound}, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Withdraw(ctx, "", "id-1", 100); !errors.Is(err, domain.ErrWalletNotFound) {
 			t.Fatalf("esperava ErrWalletNotFound, obtive %v", err)
 		}
 	})
@@ -173,8 +173,8 @@ func TestWithdraw(t *testing.T) {
 		repo := &fakeRepo{findByIDFn: func(context.Context, string) (*domain.Wallet, error) {
 			return newWallet(t, "id-1", "Alice", "alice@pix"), nil
 		}}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Withdraw(ctx, "id-1", 100); !errors.Is(err, domain.ErrInsufficientFunds) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Withdraw(ctx, "", "id-1", 100); !errors.Is(err, domain.ErrInsufficientFunds) {
 			t.Fatalf("esperava ErrInsufficientFunds, obtive %v", err)
 		}
 	})
@@ -186,10 +186,10 @@ func TestWithdraw(t *testing.T) {
 				w.Deposit(1000, fixedClock())
 				return w, nil
 			},
-			saveFn: func(context.Context, *domain.Wallet) error { return boom },
+			saveFn: func(context.Context, ...*domain.Wallet) error { return boom },
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Withdraw(ctx, "id-1", 100); !errors.Is(err, boom) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Withdraw(ctx, "", "id-1", 100); !errors.Is(err, boom) {
 			t.Fatalf("esperava boom, obtive %v", err)
 		}
 	})
@@ -203,8 +203,8 @@ func TestWithdraw(t *testing.T) {
 			},
 			saveFn: okSave,
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		w, err := svc.Withdraw(ctx, "id-1", 400)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		w, err := svc.Withdraw(ctx, "", "id-1", 400)
 		if err != nil || w.Balance() != 600 {
 			t.Fatalf("resultado inesperado: %v / %v", w, err)
 		}
@@ -224,15 +224,15 @@ func TestTransfer(t *testing.T) {
 	makeTo := func(t *testing.T) *domain.Wallet { return newWallet(t, "id-to", "Bob", "bob@pix") }
 
 	t.Run("valor invalido", func(t *testing.T) {
-		svc := application.NewWalletService(&fakeRepo{}, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "bob@pix", 0); !errors.Is(err, domain.ErrInvalidAmount) {
+		svc := application.NewWalletService(&fakeRepo{}, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Transfer(ctx, "", "id-from", "bob@pix", 0); !errors.Is(err, domain.ErrInvalidAmount) {
 			t.Fatalf("esperava ErrInvalidAmount, obtive %v", err)
 		}
 	})
 
 	t.Run("origem nao encontrada", func(t *testing.T) {
-		svc := application.NewWalletService(&fakeRepo{findByIDFn: notFound}, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "bob@pix", 100); !errors.Is(err, domain.ErrWalletNotFound) {
+		svc := application.NewWalletService(&fakeRepo{findByIDFn: notFound}, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Transfer(ctx, "", "id-from", "bob@pix", 100); !errors.Is(err, domain.ErrWalletNotFound) {
 			t.Fatalf("esperava ErrWalletNotFound, obtive %v", err)
 		}
 	})
@@ -242,8 +242,8 @@ func TestTransfer(t *testing.T) {
 			findByIDFn:  func(context.Context, string) (*domain.Wallet, error) { return makeFrom(t, 1000), nil },
 			findByPixFn: notFoundPix,
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "bob@pix", 100); !errors.Is(err, domain.ErrWalletNotFound) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Transfer(ctx, "", "id-from", "bob@pix", 100); !errors.Is(err, domain.ErrWalletNotFound) {
 			t.Fatalf("esperava ErrWalletNotFound, obtive %v", err)
 		}
 	})
@@ -254,8 +254,8 @@ func TestTransfer(t *testing.T) {
 			findByIDFn:  func(context.Context, string) (*domain.Wallet, error) { return same, nil },
 			findByPixFn: func(context.Context, string) (*domain.Wallet, error) { return same, nil },
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "alice@pix", 100); !errors.Is(err, domain.ErrSameWallet) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Transfer(ctx, "", "id-from", "alice@pix", 100); !errors.Is(err, domain.ErrSameWallet) {
 			t.Fatalf("esperava ErrSameWallet, obtive %v", err)
 		}
 	})
@@ -265,8 +265,8 @@ func TestTransfer(t *testing.T) {
 			findByIDFn:  func(context.Context, string) (*domain.Wallet, error) { return makeFrom(t, 0), nil },
 			findByPixFn: func(context.Context, string) (*domain.Wallet, error) { return makeTo(t), nil },
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "bob@pix", 100); !errors.Is(err, domain.ErrInsufficientFunds) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Transfer(ctx, "", "id-from", "bob@pix", 100); !errors.Is(err, domain.ErrInsufficientFunds) {
 			t.Fatalf("esperava ErrInsufficientFunds, obtive %v", err)
 		}
 	})
@@ -275,30 +275,11 @@ func TestTransfer(t *testing.T) {
 		repo := &fakeRepo{
 			findByIDFn:  func(context.Context, string) (*domain.Wallet, error) { return makeFrom(t, 1000), nil },
 			findByPixFn: func(context.Context, string) (*domain.Wallet, error) { return makeTo(t), nil },
-			saveFn:      func(context.Context, *domain.Wallet) error { return boom },
+			saveFn:      func(context.Context, ...*domain.Wallet) error { return boom },
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "bob@pix", 100); !errors.Is(err, boom) {
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		if _, err := svc.Transfer(ctx, "", "id-from", "bob@pix", 100); !errors.Is(err, boom) {
 			t.Fatalf("esperava boom, obtive %v", err)
-		}
-	})
-
-	t.Run("erro ao salvar destino", func(t *testing.T) {
-		calls := 0
-		repo := &fakeRepo{
-			findByIDFn:  func(context.Context, string) (*domain.Wallet, error) { return makeFrom(t, 1000), nil },
-			findByPixFn: func(context.Context, string) (*domain.Wallet, error) { return makeTo(t), nil },
-			saveFn: func(context.Context, *domain.Wallet) error {
-				calls++
-				if calls == 2 {
-					return boom
-				}
-				return nil
-			},
-		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		if _, err := svc.Transfer(ctx, "id-from", "bob@pix", 100); !errors.Is(err, boom) {
-			t.Fatalf("esperava boom no segundo save, obtive %v", err)
 		}
 	})
 
@@ -308,8 +289,8 @@ func TestTransfer(t *testing.T) {
 			findByPixFn: func(context.Context, string) (*domain.Wallet, error) { return makeTo(t), nil },
 			saveFn:      okSave,
 		}
-		svc := application.NewWalletService(repo, seqID(), fixedClock)
-		from, err := svc.Transfer(ctx, "id-from", "bob@pix", 300)
+		svc := application.NewWalletService(repo, newIdempotency(), seqID(), fixedClock)
+		from, err := svc.Transfer(ctx, "", "id-from", "bob@pix", 300)
 		if err != nil || from.Balance() != 700 {
 			t.Fatalf("resultado inesperado: %v / %v", from, err)
 		}

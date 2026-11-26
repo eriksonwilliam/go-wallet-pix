@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"math"
 	"strings"
 	"time"
 )
@@ -57,14 +58,18 @@ func (w *Wallet) Transactions() []Transaction {
 	return append([]Transaction(nil), w.transactions...)
 }
 
-// Deposit credita um valor na carteira.
-func (w *Wallet) Deposit(amount int64, at time.Time) {
-	w.credit(Deposit, amount, at)
+// Clone devolve uma copia independente, inclusive do extrato. Quem guarda
+// carteiras (repositorio, registro de idempotencia) guarda copias: alterar a
+// carteira recebida nao pode mudar o estado guardado antes do Save.
+func (w *Wallet) Clone() *Wallet {
+	clone := *w
+	clone.transactions = w.Transactions()
+	return &clone
 }
 
-// TransferIn credita um valor recebido via transferencia (PIX).
-func (w *Wallet) TransferIn(amount int64, at time.Time) {
-	w.credit(TransferIn, amount, at)
+// Deposit credita um valor na carteira.
+func (w *Wallet) Deposit(amount int64, at time.Time) error {
+	return w.credit(Deposit, amount, at)
 }
 
 // Withdraw debita um valor, respeitando o saldo disponivel.
@@ -72,14 +77,35 @@ func (w *Wallet) Withdraw(amount int64, at time.Time) error {
 	return w.debit(Withdraw, amount, at)
 }
 
-// TransferOut debita um valor enviado via transferencia (PIX).
-func (w *Wallet) TransferOut(amount int64, at time.Time) error {
-	return w.debit(TransferOut, amount, at)
+// Transfer move um valor entre duas carteiras. Valida as duas pontas antes de
+// alterar qualquer uma: ou as duas mudam, ou nenhuma.
+func Transfer(from, to *Wallet, amount int64, at time.Time) error {
+	if amount > from.balance {
+		return ErrInsufficientFunds
+	}
+	if !to.canCredit(amount) {
+		return ErrBalanceOverflow
+	}
+	from.balance -= amount
+	from.record(TransferOut, amount, at)
+	to.balance += amount
+	to.record(TransferIn, amount, at)
+	return nil
 }
 
-func (w *Wallet) credit(t TransactionType, amount int64, at time.Time) {
+// canCredit evita o overflow de int64: sem a checagem, MaxInt64 + 1 vira um
+// saldo negativo e quebra o invariante central da carteira.
+func (w *Wallet) canCredit(amount int64) bool {
+	return amount <= math.MaxInt64-w.balance
+}
+
+func (w *Wallet) credit(t TransactionType, amount int64, at time.Time) error {
+	if !w.canCredit(amount) {
+		return ErrBalanceOverflow
+	}
 	w.balance += amount
 	w.record(t, amount, at)
+	return nil
 }
 
 func (w *Wallet) debit(t TransactionType, amount int64, at time.Time) error {

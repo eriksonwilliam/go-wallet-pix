@@ -22,11 +22,16 @@ func newRouter() http.Handler {
 	n := 0
 	idGen := func() string { n++; return "wallet-" + string(rune('a'+n-1)) }
 	clock := func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
-	svc := application.NewWalletService(repo, idGen, clock)
-	return httpapi.NewRouter(httpapi.NewHandler(svc))
+	svc := application.NewWalletService(repo, memory.NewIdempotencyStore(), idGen, clock)
+	return httpapi.NewRouter(httpapi.NewHandler(svc), httpapi.NewMetrics())
 }
 
 func do(t *testing.T, router http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doWithHeaders(t, router, method, path, body, nil)
+}
+
+func doWithHeaders(t *testing.T, router http.Handler, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader *bytes.Reader
 	if body == "" {
@@ -35,6 +40,9 @@ func do(t *testing.T, router http.Handler, method, path, body string) *httptest.
 		reader = bytes.NewReader([]byte(body))
 	}
 	req := httptest.NewRequest(method, path, reader)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
@@ -174,7 +182,7 @@ func TestErrorMappings(t *testing.T) {
 // falhaRepo retorna sempre um erro generico, para exercitar o mapeamento 500.
 type falhaRepo struct{}
 
-func (falhaRepo) Save(context.Context, *domain.Wallet) error { return errors.New("indisponivel") }
+func (falhaRepo) Save(context.Context, ...*domain.Wallet) error { return errors.New("indisponivel") }
 func (falhaRepo) FindByID(context.Context, string) (*domain.Wallet, error) {
 	return nil, errors.New("indisponivel")
 }
@@ -183,11 +191,69 @@ func (falhaRepo) FindByPixKey(context.Context, string) (*domain.Wallet, error) {
 }
 
 func TestInternalServerError(t *testing.T) {
-	svc := application.NewWalletService(falhaRepo{}, func() string { return "x" }, time.Now)
-	router := httpapi.NewRouter(httpapi.NewHandler(svc))
+	svc := application.NewWalletService(falhaRepo{}, memory.NewIdempotencyStore(), func() string { return "x" }, time.Now)
+	router := httpapi.NewRouter(httpapi.NewHandler(svc), httpapi.NewMetrics())
 
 	rec := do(t, router, http.MethodGet, "/wallets/qualquer", "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("esperava 500, obtive %d", rec.Code)
+	}
+}
+
+func TestIdempotencyKeyHeader(t *testing.T) {
+	router := newRouter()
+	alice := decodeWallet(t, do(t, router, http.MethodPost, "/wallets", `{"owner":"Alice","pix_key":"alice@pix"}`))
+	path := "/wallets/" + alice["id"].(string) + "/deposit"
+	key := map[string]string{"Idempotency-Key": "dep-1"}
+
+	for attempt := 0; attempt < 3; attempt++ {
+		rec := doWithHeaders(t, router, http.MethodPost, path, `{"amount_cents":1000}`, key)
+		if rec.Code != http.StatusOK || decodeWallet(t, rec)["balance_cents"].(float64) != 1000 {
+			t.Fatalf("tentativa %d: %d %s", attempt, rec.Code, rec.Body.String())
+		}
+	}
+
+	conflict := doWithHeaders(t, router, http.MethodPost, path, `{"amount_cents":2000}`, key)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("chave reutilizada com outro valor: esperava 409, obtive %d", conflict.Code)
+	}
+}
+
+func TestOverflowMapsToConflict(t *testing.T) {
+	router := newRouter()
+	alice := decodeWallet(t, do(t, router, http.MethodPost, "/wallets", `{"owner":"Alice","pix_key":"alice@pix"}`))
+	path := "/wallets/" + alice["id"].(string) + "/deposit"
+	do(t, router, http.MethodPost, path, `{"amount_cents":9223372036854775807}`)
+
+	if rec := do(t, router, http.MethodPost, path, `{"amount_cents":1}`); rec.Code != http.StatusConflict {
+		t.Fatalf("esperava 409, obtive %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMetricsCountRequestsByRoutePattern(t *testing.T) {
+	router := newRouter()
+	alice := decodeWallet(t, do(t, router, http.MethodPost, "/wallets", `{"owner":"Alice","pix_key":"alice@pix"}`))
+	do(t, router, http.MethodGet, "/wallets/"+alice["id"].(string), "")
+	do(t, router, http.MethodGet, "/wallets/nao-existe", "")
+	do(t, router, http.MethodGet, "/rota/inexistente", "")
+	do(t, router, http.MethodPost, "/outra/inexistente", "")
+
+	rec := do(t, router, http.MethodGet, "/metrics", "")
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("status %d, content-type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	for _, want := range []string{
+		`http_requests_total{method="POST",route="/wallets",status="201"} 1`,
+		`http_requests_total{method="GET",route="/wallets/{id}",status="200"} 1`,
+		`http_requests_total{method="GET",route="/wallets/{id}",status="404"} 1`,
+		`http_requests_total{method="GET",route="unmatched",status="404"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("faltou %q em:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, alice["id"].(string)) {
+		t.Fatal("id da carteira vazou para o label de rota")
 	}
 }
