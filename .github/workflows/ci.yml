@@ -28,6 +28,11 @@ jobs:
       - name: Testes com cobertura
         run: go test ./internal/... -covermode=atomic -coverprofile=coverage.out
 
+      - name: Testes com detector de corrida
+        # A carteira e acessada por requisicoes concorrentes; -race pega leitura
+        # e escrita sem sincronizacao que a cobertura nao enxerga.
+        run: go test -race ./internal/...
+
       - name: Exigir cobertura de 100%
         run: |
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
